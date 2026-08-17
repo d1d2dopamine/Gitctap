@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 CONFIG_VERSION = 1
 DEFAULT_TIMEOUT = 25
 
@@ -1702,6 +1702,12 @@ def cmd_create(args: argparse.Namespace) -> int:
             "'%s' is not a usable repository name: start with a letter or a digit, then letters, "
             "digits, dot, dash or underscore" % name
         )
+    if not args.on and interactive():
+        answer = ask(
+            "Where should it be created? (github, codeberg, gitlab, gitea, or several, space separated)",
+            "github",
+        )
+        args.on = [piece for piece in answer.replace(",", " ").split() if piece]
     if not args.on:
         die(
             "say where to create it: gitctap create %s --on github --on codeberg (--on is repeatable)"
@@ -1992,7 +1998,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if handler is None:
         parser.print_help()
         out()
-        out("start with: gitctap setup")
+        out("two commands to remember:")
+        out("  gitctap create my-project --on github   make the repositories and link them")
+        out("  gitctap setup                          link repositories that already exist")
+        out()
+        out("then, from your project folder: gitctap push")
         return 0
     try:
         return int(handler(args) or 0)

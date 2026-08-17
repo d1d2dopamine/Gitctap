@@ -20,7 +20,7 @@ terminal · Python 3, no dependencies · nothing destructive, ever
 <img src="https://img.shields.io/badge/python-3.8%2B-FF4B33?style=flat-square&labelColor=1c1c1c" alt="Python 3.8+">
 <img src="https://img.shields.io/badge/dependencies-none-FF4B33?style=flat-square&labelColor=1c1c1c" alt="No dependencies">
 <img src="https://img.shields.io/badge/forges-any-8B7FFF?style=flat-square&labelColor=1c1c1c" alt="Any forge">
-<img src="https://img.shields.io/badge/version-0.2.0-8B7FFF?style=flat-square&labelColor=1c1c1c" alt="Version 0.2.0">
+<img src="https://img.shields.io/badge/version-0.3.0-8B7FFF?style=flat-square&labelColor=1c1c1c" alt="Version 0.3.0">
 
 <br><br>
 
@@ -71,34 +71,143 @@ The exclamation mark belongs to the name, not to the command: you type `gitctap`
 
 | Needs | Version |
 | --- | --- |
-| Python | 3.8+ |
-| Git | 2.x, already in `PATH` |
-| System | Linux · macOS · WSL |
+| Python | 3.8 or newer |
+| Git | any 2.x, reachable in `PATH` |
+| System | Linux · macOS · Windows · WSL |
 
-From a clone:
+gitctap is a single Python file with no dependencies. Installing it only means putting that
+file where your shell can find it, which is all the scripts below do.
+
+**Linux, macOS, WSL**
 
 ```sh
 git clone https://github.com/d1d2dopamine/gitctap.git
 cd gitctap
-bash install.sh          # copies one file into ~/.local/bin/gitctap
+bash install.sh          # copies gitctap.py to ~/.local/bin/gitctap
+gitctap --version
 ```
 
-Or the one file, by hand:
+`PREFIX=/usr/local bash install.sh` installs system-wide and `bash install.sh --uninstall`
+removes the file again. `pip install --user .` from the clone works as well, or take the
+single file by hand:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/d1d2dopamine/gitctap/main/gitctap.py
+curl -fsSL -o gitctap.py https://raw.githubusercontent.com/d1d2dopamine/gitctap/main/gitctap.py
 install -Dm755 gitctap.py ~/.local/bin/gitctap
 ```
 
-Or with pip, from the clone:
+**Windows**
 
-```sh
-pip install --user .
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Uninstalling is `bash install.sh --uninstall`, or deleting that one file. The
-configuration in `~/.config/gitctap/` is left behind on purpose; delete the folder if
-you want it gone.
+That copies `gitctap.py` and `gitctap.cmd` into `%LOCALAPPDATA%\Programs\gitctap`, adds the
+folder to your user `PATH` and never asks for administrator rights. Open a new terminal
+afterwards, then run `gitctap --version`. Inside the unpacked folder `.\gitctap` works
+without installing anything at all. To undo: delete that folder and drop the `PATH` entry
+(Windows search: *environment variables for your account*).
+
+On a fresh Windows, `python3` is a Microsoft Store placeholder that prints the word `Python`
+without a version. Both `gitctap.cmd` and `install.ps1` ignore it and look for a real
+interpreter (`py -3`, then `python`).
+
+The configuration in `~/.config/gitctap/` survives every uninstall on purpose; delete that
+folder if you want it gone.
+
+Never opened a terminal before? Open the block for your system and follow it line by line.
+
+<details>
+<summary><b>Windows, step by step</b></summary>
+
+1. **Python.** Open the Microsoft Store, search for `Python 3.13`, press *Get*.
+2. **Git.** Download it from [git-scm.com](https://git-scm.com/download/win) and click
+   through the installer with its default answers.
+3. **gitctap.** On this page press the green *Code* button, choose *Download ZIP*, then
+   right-click the downloaded file and pick *Extract All*.
+4. **A terminal in that folder.** Open the extracted folder, click the address bar at the
+   top of the window, type `powershell`, press Enter. A window opens, already pointed at
+   that folder.
+5. **Install.** Paste this line, press Enter:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\install.ps1
+   ```
+
+6. **Reopen the terminal.** Close the window, open a new one from the Start menu
+   (`PowerShell`), because `PATH` is only read at startup. Then check:
+
+   ```powershell
+   gitctap --version
+   ```
+
+   `gitctap! 0.3.0` means you are done and the command now works in any folder.
+
+</details>
+
+<details>
+<summary><b>macOS, step by step</b></summary>
+
+1. **A terminal.** Press `Cmd + Space`, type `Terminal`, press Enter.
+2. **Git.** Run `git --version`. If macOS offers to install the developer tools, accept:
+   that brings Git with it.
+3. **Python.** Run `python3 --version`. If it is missing, install it from
+   [python.org](https://www.python.org/downloads/macos/).
+4. **Install gitctap.**
+
+   ```sh
+   git clone https://github.com/d1d2dopamine/gitctap.git
+   cd gitctap
+   bash install.sh
+   ```
+
+5. **If the shell answers `command not found: gitctap`,** add the folder to your `PATH`
+   once, then open a new window:
+
+   ```sh
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+   ```
+
+6. **Check.** `gitctap --version` now works from any folder.
+
+</details>
+
+<details>
+<summary><b>Linux, step by step</b></summary>
+
+1. **A terminal.** `Ctrl + Alt + T`, or find *Terminal* in the applications menu.
+2. **Git and Python** are usually installed already. If not:
+   `sudo apt install git python3` on Debian and Ubuntu, `sudo dnf install git python3` on
+   Fedora, `sudo pacman -S git python` on Arch.
+3. **Install gitctap.**
+
+   ```sh
+   git clone https://github.com/d1d2dopamine/gitctap.git
+   cd gitctap
+   bash install.sh
+   ```
+
+4. **If `gitctap` is not found,** the installer prints the single line to append to your
+   shell profile (`~/.bashrc` or `~/.zshrc`). Add it, open a new terminal.
+5. **Check.** `gitctap --version`.
+
+</details>
+
+<details>
+<summary><b>The words used here</b></summary>
+
+- **Terminal** — a window where you type commands instead of clicking buttons.
+- **`cd some/folder`** — "go into that folder". `cd ..` goes one level up.
+- **`PATH`** — the list of folders your terminal searches for programs. A command becomes
+  available everywhere once its folder is on that list.
+- **Forge** — a site that hosts Git repositories: GitHub, Codeberg, GitLab, Gitea.
+- **Remote** — the name a local project uses for one such repository, `origin` for
+  example. gitctap keeps one remote per forge and pushes to all of them.
+- **Token** — a long string a program uses instead of your password when it talks to a
+  forge. Needed only by `gitctap create`, see
+  [Starting from scratch](#-starting-from-scratch).
+
+</details>
 
 ---
 
@@ -385,33 +494,144 @@ Git.** У него нет своего сравнения файлов, нет �
 
 | Нужно | Версия |
 | --- | --- |
-| Python | 3.8+ |
-| Git | 2.x, уже в `PATH` |
-| Система | Linux · macOS · WSL |
+| Python | 3.8 или новее |
+| Git | любой 2.x, доступный в `PATH` |
+| Система | Linux · macOS · Windows · WSL |
 
-Из клона:
+gitctap — один файл на Python без зависимостей. Установить — значит положить этот файл туда,
+где терминал его найдёт. Ровно это делают скрипты ниже.
+
+**Linux, macOS, WSL**
 
 ```sh
 git clone https://github.com/d1d2dopamine/gitctap.git
 cd gitctap
-bash install.sh          # копирует один файл в ~/.local/bin/gitctap
+bash install.sh          # копирует gitctap.py в ~/.local/bin/gitctap
+gitctap --version
 ```
 
-Или один файл, руками:
+`PREFIX=/usr/local bash install.sh` ставит в систему целиком, `bash install.sh --uninstall`
+убирает файл обратно. Работает и `pip install --user .` из клона, и ручной
+вариант с одним файлом:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/d1d2dopamine/gitctap/main/gitctap.py
+curl -fsSL -o gitctap.py https://raw.githubusercontent.com/d1d2dopamine/gitctap/main/gitctap.py
 install -Dm755 gitctap.py ~/.local/bin/gitctap
 ```
 
-Или через pip, из клона:
+**Windows**
 
-```sh
-pip install --user .
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Удаление — `bash install.sh --uninstall` или просто удалить этот один файл. Конфиг в
-`~/.config/gitctap/` остаётся специально; если он больше не нужен, удали папку.
+Скрипт копирует `gitctap.py` и `gitctap.cmd` в `%LOCALAPPDATA%\Programs\gitctap`, добавляет
+эту папку в пользовательский `PATH` и не требует прав администратора. После него
+откройте новый терминал и выполните `gitctap --version`. Внутри распакованной
+папки работает и `.\gitctap` — вообще без установки. Откат: удалить папку и строку
+из `PATH` (поиск Windows: *переменные среды для вашей учётной записи*).
+
+В свежей Windows `python3` — это заглушка Microsoft Store: она печатает слово
+`Python` без версии. И `gitctap.cmd`, и `install.ps1` её игнорируют и ищут настоящий
+интерпретатор (`py -3`, затем `python`).
+
+Настройки в `~/.config/gitctap/` специально переживают любое удаление программы;
+удалите эту папку вручную, если хотите стереть всё.
+
+Никогда не открывали терминал? Раскройте блок своей системы и идите по шагам.
+
+<details>
+<summary><b>Windows, по шагам</b></summary>
+
+1. **Python.** Откройте Microsoft Store, найдите `Python 3.13`, нажмите *Получить*.
+2. **Git.** Скачайте с [git-scm.com](https://git-scm.com/download/win) и пройдите установщик
+   кнопкой *Next*, ничего не меняя.
+3. **gitctap.** На этой странице нажмите зелёную кнопку *Code*, затем *Download ZIP*.
+   Скачанный архив распакуйте: правая кнопка → *Извлечь всё*.
+4. **Терминал в этой папке.** Откройте распакованную папку, щёлкните по адресной
+   строке сверху, наберите `powershell` и нажмите Enter. Откроется окно, уже
+   нацеленное на эту папку.
+5. **Установка.** Вставьте строку и нажмите Enter:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\install.ps1
+   ```
+
+6. **Переоткройте терминал.** Закройте окно и откройте новое через меню Пуск
+   (`PowerShell`): `PATH` читается только при запуске. Проверьте:
+
+   ```powershell
+   gitctap --version
+   ```
+
+   Ответ `gitctap! 0.3.0` значит, что всё готово и команда работает из любой папки.
+
+</details>
+
+<details>
+<summary><b>macOS, по шагам</b></summary>
+
+1. **Терминал.** Нажмите `Cmd + Space`, наберите `Terminal`, Enter.
+2. **Git.** Выполните `git --version`. Если macOS предложит установить инструменты
+   разработчика — соглашайтесь, Git придёт вместе с ними.
+3. **Python.** Выполните `python3 --version`. Если его нет, установите с
+   [python.org](https://www.python.org/downloads/macos/).
+4. **Установите gitctap.**
+
+   ```sh
+   git clone https://github.com/d1d2dopamine/gitctap.git
+   cd gitctap
+   bash install.sh
+   ```
+
+5. **Если терминал ответит `command not found: gitctap`,** один раз добавьте папку
+   в `PATH` и откройте новое окно:
+
+   ```sh
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+   ```
+
+6. **Проверка.** `gitctap --version` теперь работает из любой папки.
+
+</details>
+
+<details>
+<summary><b>Linux, по шагам</b></summary>
+
+1. **Терминал.** `Ctrl + Alt + T` или *Terminal* в меню приложений.
+2. **Git и Python** обычно уже стоят. Если нет:
+   `sudo apt install git python3` (Debian, Ubuntu), `sudo dnf install git python3` (Fedora),
+   `sudo pacman -S git python` (Arch).
+3. **Установите gitctap.**
+
+   ```sh
+   git clone https://github.com/d1d2dopamine/gitctap.git
+   cd gitctap
+   bash install.sh
+   ```
+
+4. **Если `gitctap` не находится,** установщик сам покажет единственную строку,
+   которую надо добавить в профиль оболочки (`~/.bashrc` или `~/.zshrc`).
+   Добавьте и откройте новый терминал.
+5. **Проверка.** `gitctap --version`.
+
+</details>
+
+<details>
+<summary><b>Слова, которые здесь встречаются</b></summary>
+
+- **Терминал** — окно, где команды набирают, а не нажимают кнопки.
+- **`cd папка/подпапка`** — «перейти в эту папку». `cd ..` — на уровень выше.
+- **`PATH`** — список папок, где терминал ищет программы. Как только папка в этом
+  списке, команда работает откуда угодно.
+- **Площадка (forge)** — сайт, где живут Git-репозитории: GitHub, Codeberg, GitLab,
+  Gitea.
+- **Ремоут (remote)** — имя, под которым локальный проект знает такой репозиторий,
+  например `origin`. gitctap держит по одному ремоуту на площадку и пушит во все.
+- **Токен** — длинная строка вместо пароля, когда с площадкой говорит программа.
+  Нужен только для `gitctap create`, см. [Начать с нуля](#-начать-с-нуля).
+
+</details>
 
 ---
 
@@ -516,7 +736,7 @@ result
   gitctap push
 ```
 
-Если в папке уже есть коммиты, последний блок скажет об этом и предложит `gitctap push` —
+Если в папке уже есть коммиты, последний ��лок скажет об этом и предложит `gitctap push` —
 или сделай всё сразу: `gitctap create … --push`.
 
 **Откуда берётся авторизация**, в таком порядке:
@@ -609,7 +829,7 @@ gitctap create my-project --on mirror=codeberg                 # известн�
 python3 -m unittest discover -s tests -v
 ```
 
-Тридцать тестов, без сети: «площадки» — это bare-репозитории во временной папке.
+Шестьдесят шесть тестов, без сети: «площадки» — это bare-репозитории во временной папке.
 Они проверяют именно обещания выше: что `setup` ничего не пишет внутрь твоего
 репозитория, что `push` отчитывается по каждой площадке отдельно, что разошедшуюся
 площадку оставляют в покое, а не форсят, что `remove` не теряет ни одного коммита и

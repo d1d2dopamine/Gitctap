@@ -106,7 +106,7 @@ A forge with no usable credential fails on its own line and does not stop the ot
 
 | Flag | Meaning |
 | --- | --- |
-| `--on FORGE` | Where to create it. Repeatable; the order is the order of work. |
+| `--on FORGE` | Where to create it. Repeatable; the order is the order of work. In an interactive terminal it is asked for when omitted; in scripts and pipes its absence is an error. |
 | `--owner NAME` | Create under this organisation (GitHub/Gitea) or group (GitLab) instead of your account. |
 | `--public` | Public repositories. Default is **private**, so nothing becomes visible by accident. |
 | `--description TEXT` | Repository description on the forge. |

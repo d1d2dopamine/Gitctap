@@ -4,6 +4,31 @@ All notable changes to gitctap! are written down here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-18
+
+The same tool, far less friction on the way in.
+
+### Added
+
+- `gitctap.cmd` and `install.ps1`, so Windows runs `gitctap` instead of
+  `python gitctap.py`. The launcher skips the Microsoft Store placeholder that answers the
+  bare word `Python` and looks for `py -3`, then `python`. The installer copies two files
+  into `%LOCALAPPDATA%\Programs\gitctap`, adds that folder to the user's `PATH`, and needs
+  no administrator rights. Inside an unpacked copy, `.\gitctap` works with nothing
+  installed at all.
+- `gitctap create` asks where to create the repository when `--on` is omitted in an
+  interactive terminal, and still refuses to guess in scripts and pipes.
+- `gitctap` with no command prints the help plus the two commands worth remembering, then
+  `gitctap push`.
+
+### Changed
+
+- The README install section is rewritten per system: short copy-paste commands first, then
+  folded step-by-step blocks for Windows, macOS and Linux, plus a folded glossary of the
+  words used (terminal, `cd`, `PATH`, forge, remote, token).
+- The requirement table lists Windows next to Linux, macOS and WSL, which the launcher
+  finally makes honest.
+
 ## [0.2.0] - 2026-08-18
 
 Creating the repositories, not only publishing to them.
@@ -25,7 +50,7 @@ Creating the repositories, not only publishing to them.
 - `create` flags: `--owner`, `--public`, `--description`, `--https`, `--init`, `--push`,
   `--dry-run`, `--timeout`. `--dry-run` also shows where each forge's credential comes from.
 - `GITCTAP_DISABLE_CLI=1` to never delegate to an installed forge CLI.
-- 34 more tests (64 in total), including a source-level assertion that no `DELETE`, `PUT` or
+- 36 more tests (66 in total), including a source-level assertion that no `DELETE`, `PUT` or
   `PATCH` request exists in the file.
 - `docs/COMMANDS.md`, `docs/CONFIG.md` and `docs/SAFETY.md` sections for `create`, tokens
   and the audit of the new API client.
@@ -84,5 +109,6 @@ First release. One local Git project, several Git forges, one command.
 - Storing tokens or any other credential.
 - A GUI, issues, pull requests and CI/CD orchestration.
 
+[0.3.0]: https://github.com/d1d2dopamine/gitctap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/d1d2dopamine/gitctap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/d1d2dopamine/gitctap/releases/tag/v0.1.0
