@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.8", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: git identity for the test repositories
+        run: |
+          git config --global user.name "gitctap ci"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+
+      - name: compile
+        run: python -m compileall -q gitctap.py
+
+      - name: tests
+        run: python -m unittest discover -s tests -v
+
+      - name: smoke test
+        run: |
+          python gitctap.py --version
+          python gitctap.py --help
