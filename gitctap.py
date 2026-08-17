@@ -12,22 +12,29 @@ MIT licensed. Python 3.8+, standard library only.
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 CONFIG_VERSION = 1
 DEFAULT_TIMEOUT = 25
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# Repository names may be mixed case, unlike the short forge names above.
+REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 # Hosts we can name on our own. Anything else still works: gitctap asks for a
 # short name and treats every forge exactly the same way.
@@ -660,7 +667,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     else:
         out()
         out("Add the repositories you already created on each forge.")
-        note("gitctap never creates or deletes anything on a forge. Make the empty repository there first.")
+        note("setup only links repositories that already exist. To make them, use: gitctap create")
         note("Paste a clone URL (SSH or HTTPS). Press Enter on an empty line when you are done.")
         out()
         while True:
@@ -1155,11 +1162,717 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# creating repositories on forges
+# --------------------------------------------------------------------------- #
+#
+# This is the only place where gitctap talks to something other than Git, and
+# it can do exactly two things: read who you are, and create a repository that
+# does not exist yet. Every request is built by a small pure function, so the
+# tests can read them without a network, and only GET and POST are ever sent.
+
+
+API_KINDS = ("github", "gitea", "gitlab")
+ALLOWED_METHODS = ("GET", "POST")
+
+# short name -> (forge software, host)
+CREATE_TARGETS = {
+    "github": ("github", "github.com"),
+    "codeberg": ("gitea", "codeberg.org"),
+    "gitea": ("gitea", "gitea.com"),
+    "disroot": ("gitea", "git.disroot.org"),
+    "gitlab": ("gitlab", "gitlab.com"),
+    "framagit": ("gitlab", "framagit.org"),
+    "salsa": ("gitlab", "salsa.debian.org"),
+}
+
+CLI_TOOLS = {"github": "gh", "gitea": "tea", "gitlab": "glab"}
+
+TOKEN_ENV = {
+    "github": ["GITHUB_TOKEN", "GH_TOKEN"],
+    "gitea": ["GITEA_TOKEN"],
+    "gitlab": ["GITLAB_TOKEN", "GL_TOKEN"],
+    "codeberg": ["CODEBERG_TOKEN"],
+}
+
+TOKEN_HELP = {
+    "github": "github.com/settings/tokens, scope: repo",
+    "gitea": "your forge: Settings, Applications, scope: write:repository",
+    "gitlab": "your GitLab: Preferences, Access tokens, scope: api",
+}
+
+EXISTS_MARKS = (
+    "already exists",
+    "already been taken",
+    "name has already",
+    "repository with the same name",
+)
+
+
+def api_base_for_host(kind: str, host: str) -> str:
+    """Where the API of this forge software lives on this host."""
+    host = (host or "").strip().strip("/")
+    if not host:
+        raise ValueError("no host given")
+    if kind == "github":
+        if host in ("github.com", "www.github.com"):
+            return "https://api.github.com"
+        return "https://%s/api/v3" % host
+    if kind == "gitea":
+        return "https://%s/api/v1" % host
+    if kind == "gitlab":
+        return "https://%s/api/v4" % host
+    raise ValueError("'%s' is not forge software gitctap can create on: use gitea, gitlab or github" % kind)
+
+
+def resolve_create_target(value: str) -> Dict[str, Optional[str]]:
+    """Turn one --on value into a forge gitctap can create on.
+
+    Accepted forms:
+      github                     a forge gitctap already knows
+      mirror=codeberg            the same, under a remote name you choose
+      work=gitea:git.example.org a self-hosted forge, software spelled out
+    """
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("empty --on value: say where to create, for example --on github")
+    name, _, rest = raw.partition("=")
+    name = name.strip()
+    rest = rest.strip() or name
+    if not NAME_RE.match(name):
+        raise ValueError(
+            "'%s' is not a usable forge name: lower case letters, digits, dot, dash or underscore" % name
+        )
+    alias: Optional[str] = None
+    if ":" in rest:
+        kind, _, host = rest.partition(":")
+        kind = kind.strip().lower()
+        host = host.strip().strip("/")
+        if kind not in API_KINDS:
+            raise ValueError(
+                "'%s' is not forge software gitctap knows: use gitea, gitlab or github" % kind
+            )
+        if not host:
+            raise ValueError("no host in '%s': write it as %s=%s:git.example.org" % (raw, name, kind))
+    else:
+        known = CREATE_TARGETS.get(rest.lower())
+        if known is None:
+            raise ValueError(
+                "%s is not a forge gitctap knows, so say which software it runs: "
+                "--on %s=gitea:%s (gitea, gitlab or github)" % (rest, name, rest)
+            )
+        kind, host = known
+        alias = rest.lower()
+    return {
+        "name": name,
+        "alias": alias,
+        "kind": kind,
+        "host": host,
+        "api": api_base_for_host(kind, host),
+    }
+
+
+def token_env_names(name: str, kind: str, alias: Optional[str] = None) -> List[str]:
+    """Environment variables gitctap reads for this forge, best one first."""
+    slug = re.sub(r"[^A-Z0-9]+", "_", (name or "").upper()).strip("_")
+    names: List[str] = ["GITCTAP_%s_TOKEN" % slug] if slug else []
+    for key in (name, alias, kind):
+        for candidate in TOKEN_ENV.get((key or "").lower(), []):
+            if candidate not in names:
+                names.append(candidate)
+    return names
+
+
+def find_token(name: str, kind: str, alias: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    for variable in token_env_names(name, kind, alias):
+        value = (os.environ.get(variable) or "").strip()
+        if value:
+            return value, variable
+    return None, None
+
+
+def token_hint(target: Dict[str, Optional[str]]) -> str:
+    variables = token_env_names(str(target["name"]), str(target["kind"]), target.get("alias"))
+    hint = "set " + " or ".join("$%s" % variable for variable in variables[:3])
+    tool = CLI_TOOLS.get(str(target["kind"]))
+    if tool:
+        hint += ", or install %s" % tool
+    where = TOKEN_HELP.get(str(target["kind"]))
+    if where:
+        hint += " (%s)" % where
+    return hint
+
+
+def cli_tool_for(kind: str) -> Optional[str]:
+    """The forge's own command, if it is installed and not switched off."""
+    if os.environ.get("GITCTAP_DISABLE_CLI"):
+        return None
+    tool = CLI_TOOLS.get(kind)
+    if not tool:
+        return None
+    return shutil.which(tool)
+
+
+def api_headers(kind: str, token: str) -> Dict[str, str]:
+    headers = {"Accept": "application/json", "User-Agent": "gitctap/%s" % VERSION}
+    if kind == "github":
+        headers["Accept"] = "application/vnd.github+json"
+        headers["Authorization"] = "Bearer %s" % token
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
+    elif kind == "gitea":
+        headers["Authorization"] = "token %s" % token
+    elif kind == "gitlab":
+        headers["PRIVATE-TOKEN"] = token
+    else:
+        raise ValueError("'%s' is not forge software gitctap knows" % kind)
+    return headers
+
+
+def build_identity_request(kind: str, api: str, token: str) -> Dict[str, object]:
+    """Read-only: who does this token belong to."""
+    return {"method": "GET", "url": "%s/user" % api, "headers": api_headers(kind, token), "payload": None}
+
+
+def build_namespace_request(api: str, group: str, token: str) -> Dict[str, object]:
+    """Read-only: find a GitLab group by name."""
+    query = urllib.parse.urlencode({"search": group})
+    return {
+        "method": "GET",
+        "url": "%s/namespaces?%s" % (api, query),
+        "headers": api_headers("gitlab", token),
+        "payload": None,
+    }
+
+
+def build_create_request(
+    kind: str,
+    api: str,
+    name: str,
+    token: str,
+    owner: Optional[str] = None,
+    private: bool = True,
+    description: Optional[str] = None,
+    namespace_id: Optional[int] = None,
+) -> Dict[str, object]:
+    """The one request that changes something on a forge: create a new repository.
+
+    The repository is always created empty. gitctap never asks a forge to add a
+    README, a licence or a first commit, so your own first push stays a plain
+    fast-forward with nothing to merge.
+    """
+    headers = api_headers(kind, token)
+    if kind in ("github", "gitea"):
+        url = "%s/orgs/%s/repos" % (api, owner) if owner else "%s/user/repos" % api
+        payload: Dict[str, object] = {"name": name, "private": bool(private), "auto_init": False}
+        if kind == "gitea":
+            payload["default_branch"] = "main"
+        if description:
+            payload["description"] = description
+    elif kind == "gitlab":
+        url = "%s/projects" % api
+        payload = {
+            "name": name,
+            "path": name,
+            "visibility": "private" if private else "public",
+            "initialize_with_readme": False,
+        }
+        if namespace_id is not None:
+            payload["namespace_id"] = namespace_id
+        if description:
+            payload["description"] = description
+    else:
+        raise ValueError("'%s' is not forge software gitctap can create on" % kind)
+    return {"method": "POST", "url": url, "headers": headers, "payload": payload}
+
+
+def safe_json(text: str) -> object:
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        return None
+
+
+def api_call(request: Dict[str, object], timeout: int) -> Tuple[int, object, str]:
+    """Send one request. Reading and creating are allowed, nothing else is."""
+    method = str(request.get("method") or "")
+    if method not in ALLOWED_METHODS:
+        raise ValueError(
+            "gitctap only reads and creates, so it refuses to send %s. Allowed: %s"
+            % (method or "an empty method", ", ".join(ALLOWED_METHODS))
+        )
+    payload = request.get("payload")
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    call = urllib.request.Request(str(request["url"]), data=body, method=method)
+    for key, value in dict(request.get("headers") or {}).items():
+        call.add_header(key, value)
+    if body is not None:
+        call.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(call, timeout=timeout) as answer:
+            text = answer.read().decode("utf-8", "replace")
+            return int(answer.getcode() or 0), safe_json(text), text
+    except urllib.error.HTTPError as problem:
+        text = ""
+        try:
+            text = problem.read().decode("utf-8", "replace")
+        except OSError:
+            pass
+        return int(problem.code), safe_json(text), text
+    except (urllib.error.URLError, socket.timeout, OSError):
+        return 0, None, ""
+
+
+def api_reason(status: int, payload: object, text: str, name: str) -> str:
+    """One readable line for one failed request."""
+    message = ""
+    if isinstance(payload, dict):
+        raw = payload.get("message") or payload.get("error") or payload.get("error_description")
+        if isinstance(raw, list):
+            message = "; ".join(str(item) for item in raw)
+        elif raw:
+            message = str(raw)
+    if not message and (text or "").strip():
+        message = text.strip().splitlines()[0][:160]
+    if status == 0:
+        return "%s could not be reached: check the network or the host name" % name
+    if status in (401, 403):
+        return "token rejected by %s (%d): check the token and its scope" % (name, status)
+    if status == 404:
+        return "%s answered 404: wrong host, or this API path does not exist there" % name
+    if status == 429:
+        return "%s rate limited this token (429): wait a little and try again" % name
+    if message:
+        return "%s: %s" % (name, message)
+    return "%s answered %d" % (name, status)
+
+
+def looks_existing(text: str, payload: object) -> bool:
+    """Did the forge refuse because the repository is already there?"""
+    pieces: List[str] = [text or ""]
+    if isinstance(payload, dict):
+        for key in ("message", "error", "errors", "name"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                pieces.extend(str(item) for item in value)
+            elif isinstance(value, dict):
+                pieces.extend(str(item) for item in value.values())
+            elif value:
+                pieces.append(str(value))
+    lowered = " ".join(pieces).lower()
+    return any(mark in lowered for mark in EXISTS_MARKS)
+
+
+def clone_urls_from_payload(kind: str, payload: object) -> Dict[str, Optional[str]]:
+    if not isinstance(payload, dict):
+        return {}
+    if kind == "gitlab":
+        owner = None
+        namespace = payload.get("namespace")
+        if isinstance(namespace, dict):
+            owner = namespace.get("full_path") or namespace.get("path")
+        return {
+            "ssh": payload.get("ssh_url_to_repo"),
+            "https": payload.get("http_url_to_repo"),
+            "web": payload.get("web_url"),
+            "owner": owner,
+        }
+    owner = None
+    holder = payload.get("owner")
+    if isinstance(holder, dict):
+        owner = holder.get("login") or holder.get("username")
+    return {
+        "ssh": payload.get("ssh_url"),
+        "https": payload.get("clone_url"),
+        "web": payload.get("html_url"),
+        "owner": owner,
+    }
+
+
+def construct_clone_urls(host: str, owner: str, name: str) -> Dict[str, Optional[str]]:
+    return {
+        "ssh": "git@%s:%s/%s.git" % (host, owner, name),
+        "https": "https://%s/%s/%s.git" % (host, owner, name),
+        "web": "https://%s/%s/%s" % (host, owner, name),
+        "owner": owner,
+    }
+
+
+def login_from_payload(kind: str, payload: object) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("login", "username", "name"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def namespace_id_from_payload(payload: object, group: str) -> Optional[int]:
+    if not isinstance(payload, list):
+        return None
+    wanted = (group or "").strip().lower()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        for key in ("full_path", "path", "name"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip().lower() == wanted:
+                identifier = item.get("id")
+                if isinstance(identifier, int):
+                    return identifier
+    return None
+
+
+def build_cli_create_argv(kind: str, name: str, owner: Optional[str] = None, private: bool = True) -> List[str]:
+    """The command line for the forge's own tool, when gitctap delegates."""
+    if kind == "github":
+        target = "%s/%s" % (owner, name) if owner else name
+        return ["gh", "repo", "create", target, "--private" if private else "--public"]
+    if kind == "gitea":
+        argv = ["tea", "repos", "create", "--name", name]
+        if private:
+            argv.append("--private")
+        if owner:
+            argv += ["--owner", owner]
+        return argv
+    if kind == "gitlab":
+        argv = ["glab", "repo", "create", name, "--private" if private else "--public"]
+        if owner:
+            argv += ["--group", owner]
+        return argv
+    raise ValueError("'%s' has no command line gitctap knows" % kind)
+
+
+def extract_repo_owner(text: str, host: str, name: str) -> Optional[str]:
+    """Read the account a forge CLI just used out of whatever it printed."""
+    if not text:
+        return None
+    repository = re.escape(name)
+    patterns = (
+        r"https?://%s/([A-Za-z0-9._~-]+)/%s(?:\.git)?" % (re.escape(host), repository),
+        r"git@%s:([A-Za-z0-9._~-]+)/%s(?:\.git)?" % (re.escape(host), repository),
+        r"\b([A-Za-z0-9][A-Za-z0-9._~-]*)/%s\b" % repository,
+    )
+    for pattern in patterns:
+        found = re.search(pattern, text)
+        if found:
+            return found.group(1)
+    return None
+
+
+def run_cli(argv: Sequence[str], timeout: int) -> Tuple[int, str]:
+    try:
+        done = subprocess.run(
+            list(argv), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout
+        )
+    except FileNotFoundError:
+        return 127, "%s is not installed" % argv[0]
+    except subprocess.TimeoutExpired:
+        return 124, "%s did not answer within %d seconds" % (argv[0], timeout)
+    return int(done.returncode), done.stdout.decode("utf-8", "replace")
+
+
+def lookup_login(kind: str, api: str, token: str, timeout: int) -> Optional[str]:
+    status, payload, _ = api_call(build_identity_request(kind, api, token), timeout)
+    if 200 <= status < 300:
+        return login_from_payload(kind, payload)
+    return None
+
+
+def create_via_api(
+    target: Dict[str, Optional[str]],
+    name: str,
+    token: str,
+    source: str,
+    private: bool,
+    description: Optional[str],
+    owner: Optional[str],
+    timeout: int,
+) -> Dict[str, object]:
+    kind = str(target["kind"])
+    api = str(target["api"])
+    host = str(target["host"])
+    namespace_id = None
+    if kind == "gitlab" and owner:
+        _, groups, _ = api_call(build_namespace_request(api, owner, token), timeout)
+        namespace_id = namespace_id_from_payload(groups, owner)
+        if namespace_id is None:
+            return {"ok": False, "reason": "no group called %s on %s for this token" % (owner, host)}
+    request = build_create_request(
+        kind,
+        api,
+        name,
+        token,
+        owner=None if kind == "gitlab" else owner,
+        private=private,
+        description=description,
+        namespace_id=namespace_id,
+    )
+    status, payload, text = api_call(request, timeout)
+    if 200 <= status < 300:
+        urls = clone_urls_from_payload(kind, payload)
+        login = urls.get("owner") or owner or lookup_login(kind, api, token, timeout)
+        if not urls.get("ssh") and login:
+            urls = construct_clone_urls(host, str(login), name)
+        return {"ok": True, "created": True, "urls": urls, "owner": login, "via": source}
+    if status in (400, 409, 422) and looks_existing(text, payload):
+        login = owner or lookup_login(kind, api, token, timeout)
+        if not login:
+            return {
+                "ok": False,
+                "reason": "%s already has a repository called %s, and its account could not be read"
+                % (host, name),
+            }
+        return {
+            "ok": True,
+            "created": False,
+            "urls": construct_clone_urls(host, str(login), name),
+            "owner": login,
+            "via": source,
+        }
+    return {"ok": False, "reason": api_reason(status, payload, text, str(target["name"]))}
+
+
+def create_via_cli(
+    target: Dict[str, Optional[str]],
+    name: str,
+    tool: str,
+    private: bool,
+    owner: Optional[str],
+    description: Optional[str],
+    timeout: int,
+) -> Dict[str, object]:
+    kind = str(target["kind"])
+    host = str(target["host"])
+    argv = build_cli_create_argv(kind, name, owner=owner, private=private)
+    if description and kind in ("github", "gitlab"):
+        argv += ["--description", description]
+    code, output = run_cli(argv, timeout)
+    login = extract_repo_owner(output, host, name) or owner
+    via = "the %s command" % tool
+    if code == 0:
+        if login:
+            return {
+                "ok": True,
+                "created": True,
+                "urls": construct_clone_urls(host, str(login), name),
+                "owner": login,
+                "via": via,
+            }
+        return {
+            "ok": False,
+            "reason": "%s created it but did not say under which account, so no remote was added" % tool,
+        }
+    if looks_existing(output, None) and login:
+        return {
+            "ok": True,
+            "created": False,
+            "urls": construct_clone_urls(host, str(login), name),
+            "owner": login,
+            "via": via,
+        }
+    first = (output.strip().splitlines() or [""])[0][:160]
+    return {"ok": False, "reason": first or "%s failed" % tool}
+
+
+def ensure_repo_for_create(
+    plan: Dict[str, object],
+    name: str,
+    private: bool,
+    owner: Optional[str],
+    description: Optional[str],
+    timeout: int,
+) -> Dict[str, object]:
+    """Create the repository for one forge, whichever credential we have."""
+    target = plan["target"]  # type: ignore[index]
+    token = plan.get("token")  # type: ignore[union-attr]
+    tool = plan.get("tool")  # type: ignore[union-attr]
+    if token:
+        return create_via_api(
+            target, name, str(token), str(plan.get("source") or "a token"), private, description, owner, timeout
+        )
+    if tool:
+        return create_via_cli(target, name, Path(str(tool)).name, private, owner, description, timeout)
+    return {"ok": False, "reason": "no credentials"}
+
+
+def cmd_create(args: argparse.Namespace) -> int:
+    name = (args.name or "").strip()
+    if not REPO_NAME_RE.match(name):
+        die(
+            "'%s' is not a usable repository name: start with a letter or a digit, then letters, "
+            "digits, dot, dash or underscore" % name
+        )
+    if not args.on:
+        die(
+            "say where to create it: gitctap create %s --on github --on codeberg (--on is repeatable)"
+            % name
+        )
+
+    targets: List[Dict[str, Optional[str]]] = []
+    taken: List[str] = []
+    for value in args.on:
+        try:
+            target = resolve_create_target(value)
+        except ValueError as problem:
+            die(str(problem))
+            return 1
+        if str(target["name"]) in taken:
+            die(
+                "%s is named twice in --on: give the second one its own name, for example "
+                "--on mirror=%s" % (target["name"], target["alias"] or "codeberg")
+            )
+        taken.append(str(target["name"]))
+        targets.append(target)
+
+    private = not args.public
+    visibility = "public" if args.public else "private"
+    timeout = args.timeout or DEFAULT_TIMEOUT
+    width = max(len(str(target["name"])) for target in targets)
+
+    out(
+        "%s %s, %s, on %d forge%s"
+        % (TERM.arrow, TERM.bold(name), visibility, len(targets), "" if len(targets) == 1 else "s")
+    )
+
+    plans: List[Dict[str, object]] = []
+    missing = 0
+    for target in targets:
+        token, variable = find_token(str(target["name"]), str(target["kind"]), target.get("alias"))
+        tool = None if token else cli_tool_for(str(target["kind"]))
+        if token:
+            source: Optional[str] = "token from $%s" % variable
+        elif tool:
+            source = "the %s command" % Path(tool).name
+        elif args.dry_run or not interactive():
+            source = None
+        else:
+            source = "a token typed in now"
+        if source is None:
+            missing += 1
+        plans.append({"target": target, "token": token, "tool": tool, "source": source})
+
+    if args.dry_run:
+        for plan in plans:
+            target = plan["target"]  # type: ignore[assignment]
+            label = str(target["name"]).ljust(width)
+            if plan["source"] is None:
+                out("  %s %s no credentials" % (label, TERM.bad))
+                note(token_hint(target))
+            else:
+                out(
+                    "  %s %s would create %s (%s) on %s via %s"
+                    % (label, TERM.ok, name, visibility, target["host"], plan["source"])
+                )
+        out()
+        note("dry run: nothing was created, nothing was saved")
+        return 1 if missing else 0
+
+    if missing:
+        for plan in plans:
+            if plan["source"] is None:
+                target = plan["target"]  # type: ignore[assignment]
+                out("  %s %s no credentials" % (str(target["name"]).ljust(width), TERM.bad))
+                note(token_hint(target))
+        die("nothing was created: give gitctap a token for every forge, or install the forge's own command")
+
+    made: List[Dict[str, object]] = []
+    failures = 0
+    for plan in plans:
+        target = plan["target"]  # type: ignore[assignment]
+        label = str(target["name"]).ljust(width)
+        if not plan["token"] and not plan["tool"]:
+            typed = getpass.getpass(
+                "  token for %s (used once, never written anywhere): " % target["host"]
+            ).strip()
+            if not typed:
+                out("  %s %s no token given" % (label, TERM.bad))
+                failures += 1
+                continue
+            plan["token"] = typed
+            plan["source"] = "a token typed in now"
+        result = ensure_repo_for_create(plan, name, private, args.owner, args.description, timeout)
+        if result.get("ok"):
+            urls = dict(result.get("urls") or {})
+            what = "created" if result.get("created") else "already there, linked as it is"
+            out("  %s %s %s %s" % (label, TERM.ok, what, urls.get("web") or target["host"]))
+            made.append({"name": str(target["name"]), "urls": urls})
+        else:
+            out("  %s %s %s" % (label, TERM.bad, result.get("reason") or "failed"))
+            failures += 1
+
+    if not made:
+        out()
+        die("no repository was created, so nothing was linked and nothing was saved")
+
+    start = Path(args.chdir).expanduser() if args.chdir else Path.cwd()
+    root = find_repo_root(start)
+    if root is None and args.init:
+        code, _, _ = run_git(["init", "--initial-branch=main"], cwd=start)
+        if code != 0:
+            run_git(["init"], cwd=start)
+        root = find_repo_root(start)
+
+    out()
+    if root is None:
+        note("no Git repository here yet, so no remote was added. Run: git init, then gitctap setup")
+        for item in made:
+            urls = dict(item["urls"] or {})  # type: ignore[arg-type]
+            out("  %s %s %s" % (str(item["name"]), TERM.dot, urls.get("https") or urls.get("ssh") or ""))
+        return 1 if failures else 0
+
+    config = load_config(root) or {"name": root.name, "forges": []}
+    forges = [dict(forge) for forge in config.get("forges") or []]
+    for item in made:
+        urls = dict(item["urls"] or {})  # type: ignore[arg-type]
+        url = urls.get("https") if args.https else urls.get("ssh")
+        url = url or urls.get("https") or urls.get("ssh")
+        if not url:
+            continue
+        remote = str(item["name"])
+        linked, problem = set_remote(root, remote, str(url))
+        if not linked:
+            out("  %s remote %s could not be set: %s" % (TERM.bad, remote, (problem or "").strip()))
+            failures += 1
+            continue
+        forges = [forge for forge in forges if forge.get("name") != remote]
+        forges.append({"name": remote, "url": str(url), "remote": remote})
+        out("  %s remote %s %s %s" % (TERM.ok, remote, TERM.arrow, url))
+    config["forges"] = forges
+    path = save_config(root, config)
+    note("configuration saved to %s" % path)
+
+    out()
+    if not has_commits(root):
+        out("%s the repositories are empty, and this project has no commit yet. Next:" % TERM.arrow)
+        note("git add .")
+        note('git commit -m "first commit"')
+        note("gitctap push")
+        return 1 if failures else 0
+
+    if args.push:
+        note("publishing what you already have: gitctap push")
+        done = subprocess.run([sys.executable, os.path.abspath(__file__), "-C", str(root), "push"])
+        return int(done.returncode) or (1 if failures else 0)
+
+    out("%s the content is up to you. When it is ready:" % TERM.arrow)
+    note("git add .")
+    note('git commit -m "what changed"')
+    note("gitctap push")
+    return 1 if failures else 0
+
+
+# --------------------------------------------------------------------------- #
 # entry point
 # --------------------------------------------------------------------------- #
 
 
 EPILOG = """\
+starting a new project:
+  gitctap create my-project --on github --on codeberg
+  git add .
+  git commit -m "first commit"
+  gitctap push
+
 usual work:
   git add .
   git commit -m "what changed"
@@ -1199,6 +1912,32 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--force", action="store_true", help="replace an existing configuration without asking")
     setup.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SEC", help="network timeout per forge")
     setup.set_defaults(handler=cmd_setup)
+
+    create = subparsers.add_parser("create", help="create the repository on one or more forges, then link them")
+    create.add_argument("name", help="repository name, the same one on every forge")
+    create.add_argument(
+        "--on",
+        action="append",
+        default=[],
+        metavar="FORGE",
+        help="where to create it: github, codeberg, gitea, disroot, gitlab, framagit, salsa, "
+        "mirror=codeberg, or work=gitea:git.example.org (repeatable)",
+    )
+    create.add_argument("--owner", help="create under this organisation or group instead of your own account")
+    create.add_argument("--public", action="store_true", help="make them public (default: private)")
+    create.add_argument("--description", help="one line description to set on every forge")
+    create.add_argument("--https", action="store_true", help="use HTTPS remotes instead of SSH")
+    create.add_argument("--init", action="store_true", help="run git init here first if this is not a repository yet")
+    create.add_argument("--push", action="store_true", help="publish right away if there is already a commit")
+    create.add_argument("--dry-run", action="store_true", help="show the plan and the credentials it would use, create nothing")
+    create.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        metavar="SECONDS",
+        help="seconds to wait for each forge (default: %d)" % DEFAULT_TIMEOUT,
+    )
+    create.set_defaults(handler=cmd_create)
 
     push = subparsers.add_parser("push", help="send the current branch to every configured forge")
     push.add_argument("--branch", help="branch to publish (default: the one you are on)")

@@ -4,6 +4,46 @@ All notable changes to gitctap! are written down here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-18
+
+Creating the repositories, not only publishing to them.
+
+### Added
+
+- `gitctap create <name> --on <forge> [--on <forge> …]` — creates the **empty** repository
+  on several forges in one run, links each one as a Git remote, saves the configuration,
+  and then recommends the next step for the content (`git add` / `git commit` /
+  `gitctap push`) without ever doing it for you.
+- Known forges for `--on`: `github`, `codeberg`, `gitea`, `disroot`, `gitlab`, `framagit`,
+  `salsa`. Self-hosted servers are written out as `name=gitea:git.example.org`,
+  `name=gitlab:host` or `name=github:host`; a known forge can take another short name as
+  `mirror=codeberg`.
+- Three ways to authorise, tried in that order: a token in the environment
+  (`$GITCTAP_<FORGE>_TOKEN`, `$GITHUB_TOKEN`, `$GH_TOKEN`, `$CODEBERG_TOKEN`,
+  `$GITEA_TOKEN`, `$GITLAB_TOKEN`, `$GL_TOKEN`), the forge's own CLI (`gh`, `tea`, `glab`),
+  or a hidden one-time prompt. No credential is ever written anywhere.
+- `create` flags: `--owner`, `--public`, `--description`, `--https`, `--init`, `--push`,
+  `--dry-run`, `--timeout`. `--dry-run` also shows where each forge's credential comes from.
+- `GITCTAP_DISABLE_CLI=1` to never delegate to an installed forge CLI.
+- 34 more tests (64 in total), including a source-level assertion that no `DELETE`, `PUT` or
+  `PATCH` request exists in the file.
+- `docs/COMMANDS.md`, `docs/CONFIG.md` and `docs/SAFETY.md` sections for `create`, tokens
+  and the audit of the new API client.
+
+### Changed
+
+- New repositories are **private** by default. `--public` is an explicit choice.
+- `gitctap setup` now says that it only links repositories that already exist, and points at
+  `gitctap create` for making them.
+
+### Safety
+
+- The forge API client sends `GET` and `POST` only, and refuses any other method before the
+  request is built, so deleting or rewriting anything on a forge remains impossible.
+- `auto_init` / `initialize_with_readme` are always off: the new repository is empty, so
+  your first push is a plain fast-forward.
+- A repository that already exists on a forge is linked as it is, never overwritten.
+
 ## [0.1.0] - 2026-08-18
 
 First release. One local Git project, several Git forges, one command.
@@ -44,4 +84,5 @@ First release. One local Git project, several Git forges, one command.
 - Storing tokens or any other credential.
 - A GUI, issues, pull requests and CI/CD orchestration.
 
+[0.2.0]: https://github.com/d1d2dopamine/gitctap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/d1d2dopamine/gitctap/releases/tag/v0.1.0

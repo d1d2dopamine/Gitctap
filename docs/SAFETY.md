@@ -21,8 +21,9 @@ These are absent from the code, not merely disabled:
 | `git push --mirror`, `--prune` | Deletes remote refs that are missing locally. |
 | `git push <remote> :branch` (delete refspec) | Deletes a remote branch. |
 | Deleting remote tags | Same, for tags. |
-| Deleting a remote repository | gitctap has no forge API client at all. |
-| Creating a remote repository | Same reason. You create the empty repository on the forge yourself. |
+| Deleting a remote repository | The word `DELETE` does not appear in the file. The API client sends `GET` and `POST` only, and refuses any other method before the request is built. |
+| Renaming, transferring or changing a repository's settings | Same reason: no `PATCH`, no `PUT`. `gitctap create` can only add a new empty repository. |
+| Overwriting a repository that already exists | `create` detects it and links it as it is. |
 | `git commit`, `git add`, generated commit messages | Publishing and authoring are different jobs. |
 | `git reset`, `git rebase`, `git filter-branch` | gitctap does not touch your history either. |
 | Storing tokens, passwords or keys | Authorisation belongs to Git and to your SSH agent. |
@@ -30,6 +31,29 @@ These are absent from the code, not merely disabled:
 What is actually run against a forge is a short list: `git push <target>
 refs/heads/<branch>:refs/heads/<branch>`, `git push <target> --tags` with `--tags`,
 `git ls-remote`, and `git fetch` with `status --fetch`. Nothing else.
+
+## `create` can only add
+
+`gitctap create` (0.2.0) is the one place where gitctap speaks to a forge API instead of to
+Git, because creating a repository is the one thing Git cannot do. It is deliberately built
+as the smallest possible client:
+
+- exactly two kinds of request: `GET` to learn your own login or find a group, and `POST` to
+  create an empty repository;
+- `api_call` raises before sending anything if the method is not `GET` or `POST`, and the
+  test suite asserts that `DELETE`, `PUT` and `PATCH` appear nowhere in the file;
+- `auto_init` / `initialize_with_readme` are always `False`, so the new repository is empty
+  and your first push is a normal fast-forward, never a merge with a generated README;
+- new repositories are **private** by default; `--public` is an explicit choice;
+- a repository that already exists is linked as it is, marked `!`, and never touched — which
+  is what makes `create` safe to run twice;
+- credentials are read from the environment, or delegated to `gh`/`tea`/`glab`, or typed
+  once into a hidden prompt. Nothing is ever written to disk;
+- `--dry-run` shows which forge would be used and where its credential comes from, and
+  creates nothing.
+
+If a forge fails, the others still proceed, the successful ones are saved, and the exit code
+is 1.
 
 ## Rejected pushes stay rejected
 
@@ -96,7 +120,9 @@ The whole tool is one Python file with no dependencies. The forge-facing part is
 enough to audit in a few minutes:
 
 ```sh
-grep -n '"push"\|ls-remote\|fetch' gitctap.py
+grep -n '"push"\|ls-remote\|fetch' gitctap.py     # everything sent to Git
+grep -n '"GET"\|"POST"\|urlopen' gitctap.py       # everything sent to a forge API
+grep -n 'DELETE\|PATCH\|PUT\|--force\|--mirror' gitctap.py  # nothing destructive to find
 ```
 
 If you find a command in there that can destroy something on a forge, that is a bug —

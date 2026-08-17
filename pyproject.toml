@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitctap"
-version = "0.1.0"
+version = "0.2.0"
 description = "One local Git project, several Git forges, one command."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "d1d2dopamine" }]
-keywords = ["git", "push", "mirror", "multi-remote", "github", "codeberg", "gitlab", "cli"]
+keywords = ["git", "push", "multi-remote", "github", "codeberg", "gitlab", "gitea", "forge", "cli"]
 dependencies = []
 classifiers = [
   "Development Status :: 4 - Beta",

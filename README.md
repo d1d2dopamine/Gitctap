@@ -20,7 +20,7 @@ terminal · Python 3, no dependencies · nothing destructive, ever
 <img src="https://img.shields.io/badge/python-3.8%2B-FF4B33?style=flat-square&labelColor=1c1c1c" alt="Python 3.8+">
 <img src="https://img.shields.io/badge/dependencies-none-FF4B33?style=flat-square&labelColor=1c1c1c" alt="No dependencies">
 <img src="https://img.shields.io/badge/forges-any-8B7FFF?style=flat-square&labelColor=1c1c1c" alt="Any forge">
-<img src="https://img.shields.io/badge/version-0.1.0-8B7FFF?style=flat-square&labelColor=1c1c1c" alt="Version 0.1.0">
+<img src="https://img.shields.io/badge/version-0.2.0-8B7FFF?style=flat-square&labelColor=1c1c1c" alt="Version 0.2.0">
 
 <br><br>
 
@@ -104,15 +104,16 @@ you want it gone.
 
 ## ⚡ Quick start
 
-Create the empty repositories on the forges yourself — gitctap never creates anything
-remotely — then, inside your project:
+Already created the repositories on each forge? Link them with `gitctap setup`. If they do
+not exist yet, `gitctap create` makes them on every forge at once — see
+[Starting from scratch](#-starting-from-scratch).
 
 ```console
 $ gitctap setup
 ? Project name [my-project]:
 
 Add the repositories you already created on each forge.
-  gitctap never creates or deletes anything on a forge. Make the empty repository there first.
+  setup only links repositories that already exist. To make them, use: gitctap create
   Paste a clone URL (SSH or HTTPS). Press Enter on an empty line when you are done.
 
 ? Repository URL #1 (empty to finish): git@github.com:me/my-project.git
@@ -149,6 +150,7 @@ gitctap push
 | Command | What it does |
 | --- | --- |
 | `gitctap setup` | Checks Git, offers `git init` if needed, asks for the URL on each forge, writes the configuration, creates matching Git remotes, tests access, and pushes **only** after you say yes. |
+| `gitctap create <name> --on …` | Creates the **empty** repository on several forges in one run (GitHub, Codeberg, GitLab, Gitea, Framagit, Salsa, Disroot, or a self-hosted one), private by default, links them as remotes, and then tells you how to publish the content. A repository that already exists is linked, never overwritten. |
 | `gitctap push` | Sends the current branch to every configured forge, one after another, and prints a result line per forge. Exit code 1 if any forge refused. |
 | `gitctap status` | How far each forge is from your branch: `up to date`, `2 commits behind`, `1 commit ahead of you`, `diverged`, or the reason it could not be reached. |
 | `gitctap check` | Git, repository, branch, commits, configuration, remotes, reachability, authorisation — and publishes nothing. |
@@ -169,6 +171,56 @@ Worth knowing:
 Full reference: [`docs/COMMANDS.md`](docs/COMMANDS.md).
 
 ---
+
+## 🌱 Starting from scratch
+
+One command, one name, several forges. `create` makes the repositories empty and stops
+there: the content stays your decision.
+
+```console
+$ gitctap create my-project --on github --on codeberg
+gitctap! create · my-project · private 2 forges
+  gitctap creates empty repositories. It never overwrites or deletes one that is already there.
+
+→ github · github.com
+  ✓ created · git@github.com:me/my-project.git
+
+→ codeberg · codeberg.org
+  ✓ created · git@codeberg.org:me/my-project.git
+
+✓ git remote github · git@github.com:me/my-project.git
+✓ git remote codeberg · git@codeberg.org:me/my-project.git
+✓ configuration saved to ~/.config/gitctap/projects/my-project-4cd57620.json
+
+result
+  github   ✓ git@github.com:me/my-project.git
+  codeberg ✓ git@codeberg.org:me/my-project.git
+
+! 4 files here are not committed yet, and gitctap never commits for you.
+  git add .
+  git commit -m "first commit"
+  gitctap push
+```
+
+If the folder already has commits, the last block says so instead, and offers
+`gitctap push` — or do both at once with `gitctap create … --push`.
+
+**Where the authorisation comes from**, in this order:
+
+1. a token in an environment variable: `$GITHUB_TOKEN`, `$CODEBERG_TOKEN`, `$GITEA_TOKEN`,
+   `$GITLAB_TOKEN`, or `$GITCTAP_<FORGE>_TOKEN` for one specific forge;
+2. the forge's own CLI, if it is installed and already logged in: `gh`, `tea`, `glab`;
+3. a hidden one-time prompt, used for that single request.
+
+gitctap never writes a token anywhere. Set `GITCTAP_DISABLE_CLI=1` to skip step 2.
+
+```sh
+gitctap create my-project --on github --on codeberg --dry-run  # show the plan, create nothing
+gitctap create my-project --on github --public                 # public instead of private
+gitctap create my-project --on github --owner my-org           # under an organisation or group
+gitctap create my-project --on work=gitea:git.example.org      # self-hosted (gitea, gitlab, github)
+gitctap create my-project --on mirror=codeberg                 # a known forge under another short name
+```
 
 ## 🛡️ Safety
 
@@ -365,15 +417,16 @@ pip install --user .
 
 ## ⚡ Быстрый старт
 
-Пустые репозитории на площадках создаёшь ты сам — gitctap никогда ничего не создаёт
-на удалённой стороне. Дальше, внутри проекта:
+Репозитории на площадках уже созданы? Привяжи их через `gitctap setup`. Если их ещё нет,
+`gitctap create` создаст их сразу на всех площадках — см.
+[Начать с нуля](#-начать-с-нуля).
 
 ```console
 $ gitctap setup
 ? Project name [my-project]:
 
 Add the repositories you already created on each forge.
-  gitctap never creates or deletes anything on a forge. Make the empty repository there first.
+  setup only links repositories that already exist. To make them, use: gitctap create
   Paste a clone URL (SSH or HTTPS). Press Enter on an empty line when you are done.
 
 ? Repository URL #1 (empty to finish): git@github.com:me/my-project.git
@@ -411,11 +464,12 @@ gitctap push
 | Команда | Что делает |
 | --- | --- |
 | `gitctap setup` | Проверяет Git, предлагает `git init`, если это ещё не репозиторий, спрашивает URL на каждой площадке, сохраняет конфигурацию, создаёт одноимённые Git-remotes, проверяет доступ и делает push **только** после явного согласия. |
+| `gitctap create <name> --on …` | Создаёт **пустой** репозиторий сразу на нескольких площадках (GitHub, Codeberg, GitLab, Gitea, Framagit, Salsa, Disroot или свой сервер), по умолчанию приватный, привязывает их как remotes и подсказывает, как выложить содержимое. Уже существующий репозиторий привязывает, но никогда не перезаписывает. |
 | `gitctap push` | Отправляет текущую ветку на все настроенные площадки по очереди и печатает результат отдельной строкой на каждую. Код возврата 1, если хоть одна отказала. |
 | `gitctap status` | Насколько каждая площадка отстала от твоей ветки: `up to date`, `2 commits behind`, `1 commit ahead of you`, `diverged` — или причина, по которой до неё не дошли. |
 | `gitctap check` | Git, репозиторий, ветка, коммиты, конфигурация, remotes, доступность, авторизация — и ничего не публикует. |
 | `gitctap add <name> [url]` | Ещё одна площадка к проекту. |
-| `gitctap remove <name>` | Убирает площадку из конфигурации. **Удалённый репозиторий не трогает вообще.** |
+| `gitctap remove <name>` | Убирает площадку из конфигурации. **Удалённый репозиторий не ��рогает вообще.** |
 | `gitctap list` | Все настроенные площадки, их хосты и то, совпадает ли локальный Git-remote с конфигурацией. |
 
 Полезное:
@@ -431,6 +485,56 @@ gitctap push
 Полный справочник: [`docs/COMMANDS.md`](docs/COMMANDS.md).
 
 ---
+
+## 🌱 Начать с нуля
+
+Одна команда, одно название, несколько площадок. `create` создаёт репозитории пустыми и
+на этом останавливается: содержимое — твоё решение.
+
+```console
+$ gitctap create my-project --on github --on codeberg
+gitctap! create · my-project · private 2 forges
+  gitctap creates empty repositories. It never overwrites or deletes one that is already there.
+
+→ github · github.com
+  ✓ created · git@github.com:me/my-project.git
+
+→ codeberg · codeberg.org
+  ✓ created · git@codeberg.org:me/my-project.git
+
+✓ git remote github · git@github.com:me/my-project.git
+✓ git remote codeberg · git@codeberg.org:me/my-project.git
+✓ configuration saved to ~/.config/gitctap/projects/my-project-4cd57620.json
+
+result
+  github   ✓ git@github.com:me/my-project.git
+  codeberg ✓ git@codeberg.org:me/my-project.git
+
+! 4 files here are not committed yet, and gitctap never commits for you.
+  git add .
+  git commit -m "first commit"
+  gitctap push
+```
+
+Если в папке уже есть коммиты, последний блок скажет об этом и предложит `gitctap push` —
+или сделай всё сразу: `gitctap create … --push`.
+
+**Откуда берётся авторизация**, в таком порядке:
+
+1. токен из переменной окружения: `$GITHUB_TOKEN`, `$CODEBERG_TOKEN`, `$GITEA_TOKEN`,
+   `$GITLAB_TOKEN` или `$GITCTAP_<ПЛОЩАДКА>_TOKEN` для одной конкретной площадки;
+2. официальный CLI площадки, если он установлен и в нём уже выполнен вход: `gh`, `tea`, `glab`;
+3. скрытый одноразовый ввод токена, только для этого запроса.
+
+gitctap никогда не записывает токен на диск. `GITCTAP_DISABLE_CLI=1` отключает шаг 2.
+
+```sh
+gitctap create my-project --on github --on codeberg --dry-run  # показать план, ничего не создавать
+gitctap create my-project --on github --public                 # публичный вместо приватного
+gitctap create my-project --on github --owner my-org           # в организации или группе
+gitctap create my-project --on work=gitea:git.example.org      # свой сервер (gitea, gitlab, github)
+gitctap create my-project --on mirror=codeberg                 # известная площадка под другим именем
+```
 
 ## 🛡️ Безопасность
 

@@ -48,6 +48,85 @@ error instead of producing two remotes that fight over the same repository.
 
 ---
 
+## `gitctap create <name> --on <forge> [--on <forge> …]`
+
+Creates the **empty** repository on several forges in one run and links it to this folder.
+This is the only command that talks to a forge API instead of to Git, because creating a
+repository is the one thing Git itself cannot do.
+
+What it does, in order:
+
+1. resolves every `--on` value into a forge (kind + host + API base);
+2. decides how each forge will authorise the request, **before** creating anything;
+3. `git init` if this folder is not a repository yet (asks first, or `--init`);
+4. creates the repository on each forge, one by one, reporting each separately;
+5. saves the configuration, creates matching Git remotes;
+6. tells you what to do with the content — and never does it for you.
+
+```sh
+gitctap create my-project --on github --on codeberg
+gitctap create my-project --on github --on gitlab --public --description "one project, many forges"
+gitctap create my-project --on work=gitea:git.example.org
+```
+
+### Where it can create
+
+| `--on` value | Forge | API |
+| --- | --- | --- |
+| `github` | github.com | GitHub |
+| `codeberg` | codeberg.org | Gitea |
+| `gitea` | gitea.com | Gitea |
+| `disroot` | git.disroot.org | Gitea |
+| `gitlab` | gitlab.com | GitLab |
+| `framagit` | framagit.org | GitLab |
+| `salsa` | salsa.debian.org | GitLab |
+| `name=<known>` | the same forge under another short name, e.g. `mirror=codeberg` | — |
+| `name=gitea:host` | any self-hosted Gitea/Forgejo | Gitea |
+| `name=gitlab:host` | any self-hosted GitLab | GitLab |
+| `name=github:host` | GitHub Enterprise | GitHub |
+
+A host without a kind is refused on purpose, with the fix in the message: gitctap does not
+guess which software an unknown server runs.
+
+### Authorisation
+
+For each forge, in this order:
+
+1. **A token in the environment.** `$GITCTAP_<FORGE>_TOKEN` first (the forge's short name,
+   upper case), then the forge's usual variable: `$GITHUB_TOKEN`/`$GH_TOKEN`,
+   `$CODEBERG_TOKEN`, `$GITEA_TOKEN`, `$GITLAB_TOKEN`/`$GL_TOKEN`.
+2. **The forge's own CLI**, if it is installed and logged in: `gh`, `tea`, `glab`. gitctap
+   never sees the credential in this case. `GITCTAP_DISABLE_CLI=1` turns this step off.
+3. **A one-time prompt** (hidden input), only in an interactive terminal. The token is used
+   for that single request and is never written anywhere.
+
+A forge with no usable credential fails on its own line and does not stop the others.
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--on FORGE` | Where to create it. Repeatable; the order is the order of work. |
+| `--owner NAME` | Create under this organisation (GitHub/Gitea) or group (GitLab) instead of your account. |
+| `--public` | Public repositories. Default is **private**, so nothing becomes visible by accident. |
+| `--description TEXT` | Repository description on the forge. |
+| `--https` | Store HTTPS clone URLs in the configuration instead of SSH. |
+| `--init` | `git init` without asking, if this folder is not a repository yet. |
+| `--push` | Push the current branch right after creating, if there are commits. |
+| `--dry-run` | Show the plan and the credential source for each forge, create nothing. |
+| `--timeout SEC` | Network timeout per forge, 25 seconds by default. |
+
+### If it already exists there
+
+The repository is **linked as it is**, marked `!` in the output, and never overwritten,
+emptied or re-initialised. That is also why `create` can be run again safely: forges that
+already have the repository are just linked.
+
+### Exit codes
+
+`0` when every forge was created or linked. `1` when at least one failed — the successful
+ones are still saved into the configuration, and the failed ones are listed with a reason.
+
 ## `gitctap push`
 
 The main command. Sends the current branch to every configured forge.

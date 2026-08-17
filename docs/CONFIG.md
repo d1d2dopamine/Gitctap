@@ -86,6 +86,41 @@ a timeout, so they fail with a clear line instead of blocking forever.
 `push --quiet` is also non-interactive, which makes it the flag for cron and CI, where
 SSH keys or a helper must already be in place.
 
+## Tokens for `gitctap create`
+
+`gitctap create` is the only command that needs a forge credential, and it never stores
+one. Nothing about tokens is written into the configuration file, into the repository, or
+into any cache.
+
+For each forge it looks, in this order, at:
+
+| Source | Example |
+| --- | --- |
+| `$GITCTAP_<FORGE>_TOKEN` — the forge's short name, upper case, non-letters as `_` | `GITCTAP_WORK_TOKEN`, `GITCTAP_MIRROR_TOKEN` |
+| the forge's own usual variable | `GITHUB_TOKEN`, `GH_TOKEN`, `CODEBERG_TOKEN`, `GITEA_TOKEN`, `GITLAB_TOKEN`, `GL_TOKEN` |
+| the forge's official CLI, already logged in | `gh`, `tea`, `glab` |
+| a hidden one-time prompt, interactive terminals only | typed once, used once |
+
+A forge added under another short name keeps its own variable too: `--on mirror=codeberg`
+accepts `$GITCTAP_MIRROR_TOKEN`, `$CODEBERG_TOKEN` and `$GITEA_TOKEN`.
+
+Scopes to ask for when you create the token: `repo` on GitHub, `write:repository` on
+Gitea/Codeberg/Forgejo, `api` on GitLab.
+
+A sensible place for them is your shell profile, or better, a password manager that exports
+them for one shell session:
+
+```sh
+export GITHUB_TOKEN="..."
+export CODEBERG_TOKEN="..."
+```
+
+| Variable | Effect |
+| --- | --- |
+| `GITCTAP_DISABLE_CLI=1` | Never delegate to `gh`/`tea`/`glab`, even if they are installed. Useful in CI, and in the test suite. |
+
+Pushing itself needs no token at all: that is Git's own authorisation, as described below.
+
 ## Moving or renaming a project
 
 The configuration is found by the repository's absolute path. If you rename or move the
